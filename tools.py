@@ -9,11 +9,11 @@ def multiply(a, b):
     return a * b
 
 def divide(a, b):
-    # simple division function which returns the division of a by b if b is not zero, if b is zero, it returns an error message
+    # simple division function which raises ZeroDivisionError instead of returning an error message when dividing by zero.
     if b == 0:
-        return a / b
+        raise ZeroDivisionError("division by zero")
     else:
-        return "Division by zero is not allowed"
+        return a / b
 
 # Example usage
 if __name__ == "__main__":

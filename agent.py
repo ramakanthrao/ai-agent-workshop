@@ -8,8 +8,26 @@ from mcp.client.stdio import stdio_client
 # 1. Setup Local LLM (LM Studio)
 client_llm = OpenAI(base_url="http://localhost:1234", api_key="lm-studio")
 
+def detect_path_type(path_str):
+    """Detect if a path is a file or directory and return the type."""
+    path = path_str.strip()
+    
+    # Check if it exists
+    if os.path.exists(path):
+        if os.path.isdir(path):
+            return 'directory', path
+        elif os.path.isfile(path):
+            return 'file', path
+    
+    # If doesn't exist, infer from extension
+    if path.endswith('.py'):
+        return 'file', path
+    else:
+        return 'directory', path
+
 async def execute_action_plan(sessions, actions, context):
     """Executes a sequence of actions returned by analyze_request."""
+    import difflib
     results = {}
     
     for i, action in enumerate(actions):
@@ -41,6 +59,10 @@ async def execute_action_plan(sessions, actions, context):
                         resolved_params[key] = value
                 else:
                     resolved_params[key] = value
+            
+            # Use corrected function name if available (from typo correction)
+            if 'corrected_function_name' in context and 'function_name' in resolved_params:
+                resolved_params['function_name'] = context['corrected_function_name']
             
             print(f"  Resolved Params: {resolved_params}")
             
@@ -75,6 +97,32 @@ async def execute_action_plan(sessions, actions, context):
                 raise Exception(f"Tool '{tool_name}' not found in any MCP server")
             
             result_text = result.content[0].text
+            
+            # Special handling: if function not found, try to find closest match
+            if tool_name == 'get_function_source' and 'not found' in result_text.lower():
+                print(f"  Function not found: {resolved_params.get('function_name')}")
+                print(f"  Attempting to find closest match...")
+                
+                # Get list of available functions
+                file_path = resolved_params.get('file_path')
+                if file_path and 'result_0' in context:
+                    functions_list = context['result_0'].strip().split('\n')
+                    func_name = resolved_params.get('function_name')
+                    
+                    # Find closest match using difflib
+                    close_matches = difflib.get_close_matches(func_name, functions_list, n=1, cutoff=0.6)
+                    if close_matches:
+                        corrected_func = close_matches[0]
+                        print(f"  Found closest match: '{corrected_func}'")
+                        
+                        # Retry with corrected name
+                        resolved_params['function_name'] = corrected_func
+                        result = await sessions[session_used].call_tool(tool_name, resolved_params)
+                        result_text = result.content[0].text
+                        
+                        # Update context for future steps
+                        context['corrected_function_name'] = corrected_func
+            
             results[f"step_{i}"] = result_text
             context[f"result_{i}"] = result_text
             
@@ -145,41 +193,100 @@ async def run_agent():
                         print("Error: Could not parse LLM response as JSON")
                         print("Creating fallback action plan...\n")
                         
-                        # Extract file path and function name from user request
+                        # Extract file path from user request
                         import re
-                        file_match = re.search(r'[D:][/\\].*?\.py', user_request, re.IGNORECASE)
-                        file_path = file_match.group(0) if file_match else "tools.py"
+                        # Look for Windows path (D:\...) or Unix path (D:/...)
+                        file_match = re.search(r'[A-Za-z]:[/\\][\w./\\-]*(?:\.py)?', user_request, re.IGNORECASE)
+                        path_str = file_match.group(0) if file_match else None
                         
-                        func_match = re.search(r'(function|func)\s+(\w+)', user_request, re.IGNORECASE)
-                        func_name = func_match.group(2) if func_match else "divide" if "divide" in user_request.lower() or "devide" in user_request.lower() else "add"
+                        if not path_str:
+                            print("Error: Could not extract file/directory path from request")
+                            return
                         
-                        # Fallback action plan
-                        action_plan = {
-                            "analysis": "User wants to analyze and fix a specific function",
-                            "actions": [
-                                {
-                                    "tool": "get_function_source",
-                                    "params": {"file_path": file_path, "function_name": func_name},
-                                    "description": f"Extract function '{func_name}' from file"
-                                },
-                                {
-                                    "tool": "ask_llm_to_refactor",
-                                    "params": {"original_code": "$result_0"},
-                                    "description": "Refactor and fix the function"
-                                },
-                                {
-                                    "tool": "write_back_to_file",
-                                    "params": {"file_path": file_path, "function_name": func_name, "new_code": "$result_1"},
-                                    "description": "Write fixed function back to file"
-                                }
-                            ]
-                        }
+                        path_type, file_path = detect_path_type(path_str)
+                        
+                        # Extract function name - look for "divide", "devide", or word after "function"
+                        func_name = "divide"
+                        if "devide" in user_request.lower():
+                            func_name = "divide"  # Keep the typo as-is if user types it
+                        elif "devide" in user_request.lower():
+                            func_name = "divide"
+                        else:
+                            func_match = re.search(r'(?:function|func)\s+(\w+)', user_request, re.IGNORECASE)
+                            if func_match:
+                                func_name = func_match.group(1)
+                        
+                        # Build action plan based on path type
+                        if path_type == 'file':
+                            # Single file - list functions first to handle typos
+                            action_plan = {
+                                "analysis": f"User wants to analyze and fix function '{func_name}' in file {file_path}",
+                                "actions": [
+                                    {
+                                        "tool": "list_functions_in_file",
+                                        "params": {"file_path": file_path},
+                                        "description": f"List all functions in {file_path} to find the target function"
+                                    },
+                                    {
+                                        "tool": "get_function_source",
+                                        "params": {"file_path": file_path, "function_name": func_name},
+                                        "description": f"Extract function '{func_name}' from {file_path}"
+                                    },
+                                    {
+                                        "tool": "ask_llm_to_refactor",
+                                        "params": {"original_code": "$result_1"},
+                                        "description": "Refactor and fix the function"
+                                    },
+                                    {
+                                        "tool": "write_back_to_file",
+                                        "params": {"file_path": file_path, "function_name": func_name, "new_code": "$result_2"},
+                                        "description": "Write fixed function back to file"
+                                    }
+                                ]
+                            }
+                        else:
+                            # Directory - list files first, then analyze
+                            action_plan = {
+                                "analysis": f"User wants to analyze and fix code in directory {file_path}",
+                                "actions": [
+                                    {
+                                        "tool": "list_files_in_directory",
+                                        "params": {"directory_path": file_path},
+                                        "description": f"List all Python files in {file_path}"
+                                    },
+                                    {
+                                        "tool": "list_functions_in_file",
+                                        "params": {"file_path": os.path.join(file_path, "tools.py")},
+                                        "description": "List functions in tools.py"
+                                    },
+                                    {
+                                        "tool": "get_function_source",
+                                        "params": {"file_path": os.path.join(file_path, "tools.py"), "function_name": func_name},
+                                        "description": f"Extract function '{func_name}'"
+                                    },
+                                    {
+                                        "tool": "ask_llm_to_refactor",
+                                        "params": {"original_code": "$result_2"},
+                                        "description": "Refactor and fix the function"
+                                    },
+                                    {
+                                        "tool": "write_back_to_file",
+                                        "params": {"file_path": os.path.join(file_path, "tools.py"), "function_name": func_name, "new_code": "$result_3"},
+                                        "description": "Write fixed function back to file"
+                                    }
+                                ]
+                            }
                     
                     print(f"\nAnalysis: {action_plan.get('analysis')}")
                     print(f"Number of actions: {len(action_plan.get('actions', []))}")
                     
-                    # Confirm with user
-                    confirm = input("\nDo you want to proceed with this plan? (yes/no): ").lower()
+                    # Confirm with user (auto-confirm for fallback)
+                    if "Analysis Error" in analysis_text or "could not parse" in analysis_text.lower():
+                        print("\nUsing fallback plan (auto-confirmed)")
+                        confirm = 'y'
+                    else:
+                        confirm = input("\nDo you want to proceed with this plan? (yes/no): ").lower()
+                    
                     if confirm not in ['yes', 'y']:
                         print("Plan cancelled.")
                         return
