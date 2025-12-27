@@ -6,7 +6,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 # 1. Setup Local LLM (LM Studio)
-client_llm = OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
+client_llm = OpenAI(base_url="http://localhost:1234", api_key="lm-studio")
 
 async def execute_action_plan(sessions, actions, context):
     """Executes a sequence of actions returned by analyze_request."""
@@ -96,14 +96,24 @@ async def run_agent():
                         "user_prompt": user_request
                     })
                     
-                    print(f"\nAnalysis Result:\n{analysis_result}\n")
+                    # Extract text content from result
+                    analysis_text = analysis_result.content[0].text if hasattr(analysis_result.content[0], 'text') else str(analysis_result.content[0])
+                    print(f"\nAnalysis Result:\n{analysis_text}\n")
+                    
+                    # Remove markdown code fences if present
+                    analysis_text = analysis_text.strip()
+                    if analysis_text.startswith("```"):
+                        analysis_text = analysis_text.split("```")[1]
+                        if analysis_text.startswith("json"):
+                            analysis_text = analysis_text[4:]
+                        analysis_text = analysis_text.strip()
                     
                     # Parse the JSON response
                     try:
-                        action_plan = json.loads(analysis_result)
+                        action_plan = json.loads(analysis_text)
                     except json.JSONDecodeError:
                         print("Error: Could not parse LLM response as JSON")
-                        print("Raw response:", analysis_result)
+                        print("Raw response:", analysis_text)
                         return
                     
                     print(f"\nAnalysis: {action_plan.get('analysis')}")

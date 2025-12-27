@@ -46,7 +46,7 @@ def analyze_request(user_prompt: str) -> str:
     }
 
     try:
-        response = requests.post(LM_STUDIO_URL, json=payload, timeout=30)
+        response = requests.post(LM_STUDIO_URL, json=payload, timeout=120)
         response.raise_for_status()
         content = response.json()['choices'][0]['message']['content']
         return content.strip()
@@ -71,7 +71,7 @@ def ask_llm_to_refactor(original_code: str) -> str:
     }
 
     try:
-        response = requests.post(LM_STUDIO_URL, json=payload, timeout=30)
+        response = requests.post(LM_STUDIO_URL, json=payload, timeout=120)
         response.raise_for_status()
         # Extract content and remove markdown code fences if the LLM added them
         content = response.json()['choices'][0]['message']['content']
