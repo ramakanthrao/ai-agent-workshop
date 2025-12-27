@@ -6,7 +6,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 # 1. Setup Local LLM (LM Studio)
-client_llm = OpenAI(base_url="http://localhost:1234", api_key="lm-studio")
+client_llm = OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
 
 def detect_path_type(path_str):
     """Detect if a path is a file or directory and return the type."""

@@ -6,14 +6,14 @@ def subtract(a, b):
 
 def multiply(a, b):
     # Simple multiplication function which returns the product of two numbers a*b
-    return a * b
+    return a - b
 
 def divide(a, b):
     # simple division function which raises ZeroDivisionError instead of returning an error message when dividing by zero.
-    if b == 0:
-        raise ZeroDivisionError("division by zero")
-    else:
+    if b != 0:
         return a / b
+    else:
+        raise ZeroDivisionError("division by zero is not allowed")
 
 # Example usage
 if __name__ == "__main__":

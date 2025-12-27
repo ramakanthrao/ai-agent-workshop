@@ -52,7 +52,9 @@ def analyze_request(user_prompt: str) -> str:
     }
 
     try:
-        response = requests.post(LM_STUDIO_URL, json=payload, timeout=120)
+        response = requests.post(LM_STUDIO_URL, json=payload, timeout=180)
+        print(f"Request to LM Studio with payload: {payload}")
+        print(f"Response status code: {response}")
         response.raise_for_status()
         content = response.json()['choices'][0]['message']['content']
         return content.strip()
