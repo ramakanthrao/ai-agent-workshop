@@ -10,31 +10,6 @@ mcp = FastMCP("CodeModifier")
 LM_STUDIO_URL = "http://localhost:1234/v1/chat/completions"
 
 @mcp.tool()
-def ask_llm_to_refactor(original_code: str) -> str:
-    """Sends code to LM Studio to fix its logic."""
-    prompt = (
-        "You are a code refactoring assistant. Your task is to correct the logic "
-        "of the provided Python function while keeping the signature exactly the same.\n\n"
-        f"Original Code:\n{original_code}\n\n"
-        "Return ONLY the corrected Python code. Do not include explanations or markdown blocks."
-    )
-
-    payload = {
-        "model": "local-model", # LM Studio usually ignores this and uses the loaded model
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.1
-    }
-
-    try:
-        response = requests.post(LM_STUDIO_URL, json=payload, timeout=30)
-        response.raise_for_status()
-        # Extract content and remove markdown code fences if the LLM added them
-        content = response.json()['choices'][0]['message']['content']
-        return content.replace("```python", "").replace("```", "").strip()
-    except Exception as e:
-        return f"LLM Error: {str(e)}"
-
-@mcp.tool()
 def write_back_to_file(file_path: str, function_name: str, new_code: str) -> str:
     """
     Reads a file, finds a function, and replaces its logic with the provided new code.
@@ -102,37 +77,6 @@ def list_functions_in_file(file_path: str) -> str:
             return f"No functions found in {file_path}"
         
         return "\n".join(functions)
-    except Exception as e:
-        return f"Error: {str(e)}"
-
-@mcp.tool()
-def write_back_to_file(file_path: str, function_name: str, new_code: str) -> str:
-    """
-    Reads a file, finds a function, and replaces its logic with the provided new code.
-    """
-    try:
-        with open(file_path, "r") as f:
-            source = f.read()
-        
-        tree = ast.parse(source)
-        lines = source.splitlines()
-        target_node = None
-        
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == function_name:
-                target_node = node
-                break
-        
-        if not target_node:
-            return f"Function '{function_name}' not found."
-
-        original_func_code = "\n".join(lines[target_node.lineno - 1 : target_node.end_lineno])
-        
-        with open(file_path, "w") as f:
-            f.write(source.replace(original_func_code, new_code))
-        
-        return f"Function '{function_name}' has been updated successfully."
-
     except Exception as e:
         return f"Error: {str(e)}"
 
