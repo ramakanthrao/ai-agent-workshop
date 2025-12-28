@@ -5,8 +5,8 @@ def subtract(a, b):
     return a - b
 
 def multiply(a, b):
-    # Simple multiplication function which returns the product of two numbers a*b
-    return a - b
+    # Corrected multiplication function which returns the product of two numbers a*b
+    return a * b
 
 def divide(a, b):
     # simple division function which raises ZeroDivisionError instead of returning an error message when dividing by zero.

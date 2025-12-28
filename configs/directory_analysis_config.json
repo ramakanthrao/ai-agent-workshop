@@ -1,0 +1,81 @@
+{
+  "user_request": "Analyze all Python files in the sample directory, find functions with bugs, and fix them",
+  "analysis_scope": "d:\\projects\\ai\\code-summarizer-mcp\\sample",
+  "file_pattern": "module*.py",
+  "actions": [
+    {
+      "step": "1",
+      "description": "List all Python files in the sample directory",
+      "tool": "read_directory_for_files",
+      "params": {
+        "directory_path": "d:\\projects\\ai\\code-summarizer-mcp\\sample"
+      }
+    },
+    {
+      "step": "2",
+      "description": "Process each file in a loop to extract all functions",
+      "loop_required": true,
+      "loop_condition": "for each file from step 1",
+      "actions_loop": [
+        {
+          "step": "2.1",
+          "description": "Get all functions from current file",
+          "tool": "list_functions_in_file",
+          "params": {
+            "file_path": "$loop_item"
+          }
+        },
+        {
+          "step": "2.2",
+          "description": "Process each function in the file",
+          "loop_required": true,
+          "loop_condition": "for each function from step 2.1",
+          "actions_loop": [
+            {
+              "step": "2.2.1",
+              "description": "Get the source code of current function",
+              "tool": "get_function_source",
+              "params": {
+                "file_path": "$loop_item_file",
+                "function_name": "$loop_item"
+              }
+            },
+            {
+              "step": "2.2.2",
+              "description": "Ask LLM to analyze the function for bugs",
+              "tool": "ask_llm_to_analyze_code",
+              "params": {
+                "code": "$result_last"
+              }
+            },
+            {
+              "step": "2.2.3",
+              "description": "If bugs found, fix the code",
+              "condition": "$result_last.condition",
+              "actions": [
+                {
+                  "step": "2.2.3a",
+                  "description": "Ask LLM to generate fixed code",
+                  "tool": "ask_llm_to_refactor",
+                  "params": {
+                    "code": "$result_-1"
+                  }
+                },
+                {
+                  "step": "2.2.3b",
+                  "description": "Write the fixed function back to file",
+                  "tool": "write_back_to_file",
+                  "params": {
+                    "file_path": "$loop_item_file",
+                    "function_name": "$loop_item",
+                    "new_code": "$result_last.refactored_code"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "code-analyzer": {
+      "command": "python",
+      "args": [
+        "D:/projects/ai/code-summarizer-mcp/src/mcp/llm_mcp.py"
+      ]
+    },
+    "code-modifier": {
+      "command": "python",
+      "args": [
+        "D:/projects/ai/code-summarizer-mcp/src/mcp/code_modifier_mcp.py"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}
