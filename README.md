@@ -2,7 +2,66 @@
 
 An intelligent, production-ready system for analyzing and refactoring Python code using MCP (Model Context Protocol) servers with dynamic tool discovery and comprehensive validation.
 
-**Status**: ✅ Complete and Tested | **Last Updated**: December 28, 2025
+**Status**: ✅ Complete and Tested | **Last Updated**: December 29, 2025
+
+---
+
+## 📋 Documentation Index
+
+### 📚 Latest Release Documentation (v26.01.01)
+All documentation for the latest release is organized in **`docs/26_01_01/`**:
+
+| Document | Purpose | Size |
+|----------|---------|------|
+| [`PROJECT_COMPLETE_DOCUMENTATION.md`](docs/26_01_01/PROJECT_COMPLETE_DOCUMENTATION.md) | ⭐ **START HERE** - Complete project guide covering everything | 850+ lines |
+| [`DOCUMENTATION_INDEX.md`](docs/26_01_01/DOCUMENTATION_INDEX.md) | Navigation guide with quick start and learning paths | 300 lines |
+| [`CLEANUP_REPORT.md`](docs/26_01_01/CLEANUP_REPORT.md) | Detailed analysis of cleanup operations with before/after | 500 lines |
+| [`FINAL_SUMMARY.md`](docs/26_01_01/FINAL_SUMMARY.md) | Executive summary of all completed work | 300 lines |
+| [`PROJECT_CLEANUP_SUMMARY.md`](docs/26_01_01/PROJECT_CLEANUP_SUMMARY.md) | Summary of cleanup with recommendations | 400 lines |
+
+### 📚 General Documentation (in `docs/`)
+These files provide ongoing reference for the project:
+- `API_REFERENCE.md` - Complete API documentation
+- `DEVELOPER_QUICKSTART.md` - For developers extending the system
+- `ARCHITECTURE_DIAGRAMS.md` - System architecture
+- `PROJECT_STRUCTURE.md` - Project file organization
+- `QUICK_REFERENCE.md` - Quick reference guide
+
+**Quick Links:**
+- 📖 **Read First:** [`docs/26_01_01/PROJECT_COMPLETE_DOCUMENTATION.md`](docs/26_01_01/PROJECT_COMPLETE_DOCUMENTATION.md)
+- 🧭 **Find Something:** [`docs/26_01_01/DOCUMENTATION_INDEX.md`](docs/26_01_01/DOCUMENTATION_INDEX.md)
+- 📊 **See What Changed:** [`docs/26_01_01/FINAL_SUMMARY.md`](docs/26_01_01/FINAL_SUMMARY.md)
+- 🛠️ **Installation:** See "Getting Started" section below
+
+---
+
+## ⚡ Getting Started (5 minutes)
+
+### 1. Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Start LM Studio
+- Download from https://lmstudio.ai/
+- Load a model (e.g., Phi-4 Mini)
+- Start API server on http://localhost:1234
+
+### 3. Run the Agent
+```bash
+python src/agent/agent_simplified.py
+```
+
+### 4. Follow the Prompt
+```
+Agent: "What would you like me to do?"
+You: "Analyze sample/module1.py and fix bugs"
+```
+
+### 5. Review Results
+Agent analyzes, creates a plan, and executes fixes automatically!
+
+**For more details**, see [`docs/26_01_01/PROJECT_COMPLETE_DOCUMENTATION.md`](docs/26_01_01/PROJECT_COMPLETE_DOCUMENTATION.md)
 
 ---
 

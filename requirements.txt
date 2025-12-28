@@ -1,0 +1,33 @@
+# AI Code Summarizer and MCP Agent - Requirements
+# Python 3.10+ recommended
+
+# Core MCP (Model Context Protocol) Framework
+mcp>=0.1.0
+
+# LLM and API Clients
+openai>=1.3.0
+requests>=2.31.0
+
+# JSON Schema Validation (optional but recommended)
+jsonschema>=4.19.0
+
+# Development and Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# Code Analysis
+ast  # Built-in, no installation needed
+
+# Async Support
+asyncio  # Built-in, no installation needed
+
+# Standard Library (included with Python, listed for reference)
+# json - JSON encoding/decoding
+# logging - Logging framework
+# os - Operating system interface
+# sys - System-specific parameters
+# tempfile - Temporary files and directories
+# shutil - File and directory operations
+# pathlib - Object-oriented filesystem paths
+# unittest - Unit testing framework
+# re - Regular expressions

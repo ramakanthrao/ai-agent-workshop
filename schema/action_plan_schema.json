@@ -1,0 +1,81 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Universal Action Plan Schema",
+  "type": "object",
+  "required": ["analysis", "actions"],
+  "properties": {
+    "analysis": {
+      "type": "string",
+      "description": "High-level description of the workflow's goal"
+    },
+    "actions": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/action_node" }
+    }
+  },
+  "definitions": {
+    "action_node": {
+      "type": "object",
+      "oneOf": [
+        {
+          "title": "Standard Tool Call",
+          "required": ["tool", "params"],
+          "properties": {
+            "tool": {
+              "type": "string",
+              "description": "Name of the tool/function to execute"
+            },
+            "params": {
+              "type": "object",
+              "description": "Parameters for the tool (supports $variable references)"
+            },
+            "description": {
+              "type": "string",
+              "description": "Human-readable description of what this step does"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "title": "Loop Block",
+          "required": ["loop_required", "loop_condition", "actions_loop"],
+          "properties": {
+            "loop_required": {
+              "const": true,
+              "description": "Indicates this is a loop block"
+            },
+            "loop_condition": {
+              "type": "string",
+              "description": "Description of loop iteration (e.g., 'for each function in $result_0')"
+            },
+            "actions_loop": {
+              "type": "array",
+              "items": { "$ref": "#/definitions/action_node" },
+              "description": "Actions to execute for each loop item"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "title": "Conditional Block",
+          "required": ["condition", "actions"],
+          "properties": {
+            "condition": {
+              "oneOf": [
+                { "type": "boolean" },
+                { "type": "string", "description": "Reference like $result_last.field or boolean expression" }
+              ],
+              "description": "Condition to determine if actions should execute"
+            },
+            "actions": {
+              "type": "array",
+              "items": { "$ref": "#/definitions/action_node" },
+              "description": "Actions to execute if condition is true"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

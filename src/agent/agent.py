@@ -100,15 +100,38 @@ def validate_action_plan(actions):
     
     return errors, warnings
 
-async def execute_action_plan(sessions, actions, context):
-    """Executes a sequence of actions returned by analyze_request, with support for loops and conditionals."""
-    import difflib
+async def execute_action_plan(sessions, actions, context, available_tools_cache=None):
+    """
+    Dynamically executes a sequence of actions using available tools from connected MCP servers.
+    No hardcoded tool names or server mappings - fully runtime configurable.
+    """
     results = {}
     step_counter = 0
-    step_history = {}  # Track steps for better reference resolution
     
-    async def execute_actions_recursive(action_list, indent_level=0, loop_item=None):
-        """Recursively execute actions, handling nested loops and conditionals."""
+    # Build dynamic tool-to-session mapping from available tools
+    tool_to_session = {}
+    if available_tools_cache is None:
+        available_tools_cache = {}
+    
+    # Discover all tools from all sessions if not cached
+    if not available_tools_cache:
+        for session_name, session in sessions.items():
+            try:
+                tools_list = await session.list_tools()
+                available_tools_cache[session_name] = {tool.name for tool in tools_list.tools}
+            except Exception as e:
+                print(f"  Warning: Could not list tools from {session_name}: {e}")
+                available_tools_cache[session_name] = set()
+    
+    # Build reverse mapping: tool -> session(s)
+    for session_name, tools in available_tools_cache.items():
+        for tool_name in tools:
+            if tool_name not in tool_to_session:
+                tool_to_session[tool_name] = []
+            tool_to_session[tool_name].append(session_name)
+    
+    async def execute_actions_recursive(action_list, indent_level=0, loop_item=None, outer_loop_item=None):
+        """Recursively execute actions, handling nested loops and conditionals - fully dynamic."""
         nonlocal step_counter
         
         for action in action_list:
@@ -141,9 +164,10 @@ async def execute_action_plan(sessions, actions, context):
                 # Execute loop actions for each item
                 for item in loop_items:
                     print(f"\n  [Loop iteration: {item}]")
-                    # Update context with loop item
+                    # Update context with loop item - support both current and outer loop items
                     context['loop_item'] = item
-                    await execute_actions_recursive(loop_actions, indent_level + 1, loop_item=item)
+                    context['loop_item_file'] = outer_loop_item if outer_loop_item else item
+                    await execute_actions_recursive(loop_actions, indent_level + 1, loop_item=item, outer_loop_item=outer_loop_item or item)
                     
             # Handle conditional actions
             elif action.get('condition') is not None:
@@ -152,78 +176,16 @@ async def execute_action_plan(sessions, actions, context):
                 
                 print(f"\n[Conditional: {condition}]")
                 
-                # Simple condition evaluation
-                should_execute = False
-                
-                # If condition is boolean, use it directly
-                if isinstance(condition, bool):
-                    should_execute = condition
-                # If condition is a reference like $result_last.condition, extract it
-                elif isinstance(condition, str) and condition.startswith('$'):
-                    # Extract the reference (e.g., $result_last -> result_last)
-                    var_ref = condition[1:]  # Remove $
-                    
-                    # Check if it's asking for a nested field (e.g., $result_last.condition)
-                    if '.' in var_ref:
-                        parts = var_ref.split('.')
-                        result_key = parts[0]
-                        field_name = parts[1]
-                        
-                        # Get the result object
-                        result_obj = context.get(result_key)
-                        
-                        # If it's a JSON string, parse it
-                        if isinstance(result_obj, str):
-                            try:
-                                result_obj = json.loads(result_obj)
-                            except json.JSONDecodeError:
-                                result_obj = {}
-                        
-                        # Extract the field value
-                        if isinstance(result_obj, dict) and field_name in result_obj:
-                            should_execute = result_obj[field_name]
-                            print(f"  Extracted condition from {result_key}.{field_name}: {should_execute}")
-                        else:
-                            print(f"  Warning: Could not extract {field_name} from {result_key}")
-                    else:
-                        # Just reference the variable
-                        result_obj = context.get(var_ref)
-                        should_execute = result_obj if isinstance(result_obj, bool) else bool(result_obj)
-                else:
-                    # String condition evaluation: check if keywords appear in recent results
-                    condition_lower = str(condition).lower()
-                    
-                    # Check last few results for condition keywords
-                    for i in range(max(0, step_counter - 3), step_counter + 1):
-                        result_key = f'result_{i}'
-                        if result_key in context:
-                            result_obj = context[result_key]
-                            
-                            # If it's a JSON object with 'condition' field, use that
-                            if isinstance(result_obj, str):
-                                try:
-                                    result_obj = json.loads(result_obj)
-                                except json.JSONDecodeError:
-                                    pass
-                            
-                            if isinstance(result_obj, dict) and 'condition' in result_obj:
-                                should_execute = result_obj['condition']
-                                print(f"  Found condition field in {result_key}: {should_execute}")
-                                break
-                            
-                            # Fallback to keyword matching
-                            result_text = str(result_obj).lower()
-                            if any(keyword in result_text for keyword in ['issue', 'error', 'bug', 'problem', 'critical', 'severe', 'fix', 'refactor']):
-                                should_execute = True
-                                break
+                # Dynamic condition evaluation
+                should_execute = evaluate_condition(condition, context, step_counter)
                 
                 if should_execute:
                     print(f"  Condition met, executing conditional actions...")
-                    await execute_actions_recursive(conditional_actions, indent_level + 1)
+                    await execute_actions_recursive(conditional_actions, indent_level + 1, loop_item, outer_loop_item)
                 else:
                     print(f"  Condition not met, skipping...")
             else:
-                # Regular action - execute it
+                # Regular action - execute it dynamically
                 step_counter += 1
                 tool_name = action.get('tool')
                 params = action.get('params', {})
@@ -241,184 +203,22 @@ async def execute_action_plan(sessions, actions, context):
                 
                 try:
                     # Resolve context variables in params
-                    resolved_params = {}
-                    for key, value in params.items():
-                        if isinstance(value, str):
-                            # Handle nested field references like $loop_item.function_name or $result_last.field
-                            if '.' in value and value.startswith('$'):
-                                var_ref = value[1:]  # Remove $
-                                parts = var_ref.split('.')
-                                base_var = parts[0]
-                                field_name = parts[1]
-                                
-                                # Get the base variable
-                                if base_var == 'loop_item':
-                                    # loop_item is a simple string value
-                                    if loop_item:
-                                        # For simple strings like loop_item, just use the value itself
-                                        resolved_params[key] = loop_item
-                                    else:
-                                        resolved_params[key] = value
-                                else:
-                                    # Try to get from context (e.g., result_0, result_last)
-                                    base_obj = context.get(base_var)
-                                    if isinstance(base_obj, dict) and field_name in base_obj:
-                                        resolved_params[key] = base_obj[field_name]
-                                    elif isinstance(base_obj, str):
-                                        # If base_obj is already a string (plain text result), use it
-                                        # The field_name request is likely a mistake by the LLM
-                                        print(f"  Note: {base_var} is plain text, using full result instead of {field_name}")
-                                        resolved_params[key] = base_obj
-                                    else:
-                                        print(f"  Warning: Could not resolve {value}")
-                                        # Fallback: if it looks like they want the last result, just use it
-                                        if base_var == 'result_last' or base_var.startswith('result_'):
-                                            resolved_params[key] = base_obj if base_obj else value
-                                        else:
-                                            resolved_params[key] = value
-                            # Handle $loop_item reference
-                            elif value == '$loop_item' and loop_item:
-                                resolved_params[key] = loop_item
-                            # Handle $result_last reference
-                            elif value == '$result_last' and 'result_last' in context:
-                                result_value = context['result_last']
-                                # If it's a JSON object with refactored_code (from ask_llm_to_refactor), extract it
-                                if isinstance(result_value, dict) and 'refactored_code' in result_value:
-                                    resolved_params[key] = result_value['refactored_code']
-                                else:
-                                    resolved_params[key] = result_value
-                            # Handle negative indexing like $result_-1, $result_-2
-                            elif value.startswith('$result_-'):
-                                try:
-                                    offset = int(value.split('_')[1])
-                                    ref_step = step_counter + offset
-                                    if ref_step >= 0 and ref_step < step_counter:
-                                        ref_value = context.get(f'result_{ref_step}', value)
-                                        # If it's a JSON object with refactored_code, extract it
-                                        if isinstance(ref_value, dict) and 'refactored_code' in ref_value:
-                                            resolved_params[key] = ref_value['refactored_code']
-                                        else:
-                                            resolved_params[key] = ref_value
-                                        if ref_value == value:
-                                            print(f"  Warning: Could not resolve {value} (step {ref_step} not found)")
-                                    else:
-                                        print(f"  Warning: Invalid reference {value} (step {ref_step} out of range)")
-                                        resolved_params[key] = value
-                                except Exception as e:
-                                    print(f"  Warning: Error parsing reference {value}: {e}")
-                                    resolved_params[key] = value
-                            # Handle context references like '$result_0'
-                            elif value.startswith('$'):
-                                var_name = value[1:]
-                                resolved_value = context.get(var_name, value)
-                                # If it's a JSON object with refactored_code, extract it
-                                if isinstance(resolved_value, dict) and 'refactored_code' in resolved_value:
-                                    resolved_params[key] = resolved_value['refactored_code']
-                                else:
-                                    resolved_params[key] = resolved_value
-                                if resolved_value == value and var_name.startswith('result_'):
-                                    print(f"  Warning: Reference {value} not found in context")
-                            # Handle placeholders like '<extracted code>'
-                            elif value.startswith('<') and value.endswith('>'):
-                                if f'result_{step_counter-1}' in context:
-                                    resolved_params[key] = context[f'result_{step_counter-1}']
-                                else:
-                                    resolved_params[key] = value
-                            else:
-                                resolved_params[key] = value
-                        else:
-                            resolved_params[key] = value
-                    
-                    # Use corrected function name if available
-                    if 'corrected_function_name' in context and 'function_name' in resolved_params:
-                        resolved_params['function_name'] = context['corrected_function_name']
+                    resolved_params = resolve_parameters(params, context, step_counter, loop_item, outer_loop_item)
                     
                     print(f"  Resolved Params: {resolved_params}")
                     
-                    # Try tool in both sessions
-                    result = None
-                    session_used = None
-                    
-                    # Define which tools belong to which server
-                    code_tools = {'get_function_source', 'write_back_to_file', 'list_files_in_directory', 'list_functions_in_file', 'is_input_a_directory', 'is_input_a_file', 'read_directory_for_files'}
-                    llm_tools = {'analyze_request', 'ask_llm_to_refactor', 'ask_llm_to_analyze_code'}
-                    
-                    # Prefer the correct server
-                    if tool_name in code_tools:
-                        preferred_order = ['code_modifier_mcp', 'llm_mcp']
-                    elif tool_name in llm_tools:
-                        preferred_order = ['llm_mcp', 'code_modifier_mcp']
-                    else:
-                        preferred_order = list(sessions.keys())
-                    
-                    for session_name in preferred_order:
-                        if session_name not in sessions:
-                            continue
-                        try:
-                            result = await sessions[session_name].call_tool(tool_name, resolved_params)
-                            session_used = session_name
-                            print(f"  Server: {session_name}")
-                            break
-                        except Exception as e:
-                            continue
-                    
-                    if result is None:
-                        raise Exception(f"Tool '{tool_name}' not found in any MCP server")
-                    
+                    # Execute tool dynamically on any available session
+                    result = await execute_tool_dynamic(sessions, tool_to_session, tool_name, resolved_params)
                     result_text = result.content[0].text
                     
-                    # Special handling: if function not found, try to find closest match
-                    if tool_name == 'get_function_source' and 'not found' in result_text.lower():
-                        print(f"  Function not found: {resolved_params.get('function_name')}")
-                        print(f"  Attempting to find closest match...")
-                        
-                        # Get list of available functions
-                        file_path = resolved_params.get('file_path')
-                        if file_path and 'result_0' in context:
-                            functions_list = context['result_0'].strip().split('\n')
-                            func_name = resolved_params.get('function_name')
-                            
-                            # Find closest match using difflib
-                            close_matches = difflib.get_close_matches(func_name, functions_list, n=1, cutoff=0.6)
-                            if close_matches:
-                                corrected_func = close_matches[0]
-                                print(f"  Found closest match: '{corrected_func}'")
-                                
-                                # Retry with corrected name
-                                resolved_params['function_name'] = corrected_func
-                                result = await sessions[session_used].call_tool(tool_name, resolved_params)
-                                result_text = result.content[0].text
-                                
-                                # Update context for future steps
-                                context['corrected_function_name'] = corrected_func
+                    # Parse result dynamically
+                    result_data = parse_result(result_text)
                     
-                    # Parse result as JSON if possible, otherwise keep as string
-                    result_data = None
-                    try:
-                        result_data = json.loads(result_text)
-                    except json.JSONDecodeError:
-                        result_data = result_text
-                    
-                    # For ask_llm_to_refactor, extract the refactored_code if available
-                    if tool_name == 'ask_llm_to_refactor' and isinstance(result_data, dict) and 'refactored_code' in result_data:
-                        # Store the entire JSON object, but also make refactored_code easily accessible
-                        actual_code = result_data['refactored_code']
-                        results[f"step_{step_counter}"] = result_data
-                        context[f"result_{step_counter}"] = result_data
-                        context['result_last'] = result_data
-                        # Also store the code separately for backwards compatibility
-                        context[f"result_{step_counter}_code"] = actual_code
-                        print(f"  Result: {str(result_data)[:200]}...")
-                    else:
-                        # Store normally
-                        results[f"step_{step_counter}"] = result_data if isinstance(result_data, dict) else result_text
-                        context[f"result_{step_counter}"] = result_data if isinstance(result_data, dict) else result_text
-                        context['result_last'] = result_data if isinstance(result_data, dict) else result_text
-                        print(f"  Result: {result_text[:200]}...")
-                    
-                except Exception as e:
-                    print(f"  Error: {str(e)}")
-                    results[f"step_{step_counter}"] = f"Error: {str(e)}"
+                    # Store results
+                    results[f"step_{step_counter}"] = result_data if isinstance(result_data, dict) else result_text
+                    context[f"result_{step_counter}"] = result_data if isinstance(result_data, dict) else result_text
+                    context['result_last'] = result_data if isinstance(result_data, dict) else result_text
+                    print(f"  Result: {str(result_text)[:200]}...")
                     
                 except Exception as e:
                     print(f"  Error: {str(e)}")
@@ -428,6 +228,144 @@ async def execute_action_plan(sessions, actions, context):
     await execute_actions_recursive(actions)
     
     return results
+
+
+def evaluate_condition(condition, context, step_counter):
+    """
+    Dynamically evaluate any condition without hardcoding keywords or field names.
+    Handles: boolean values, variable references, and field extractions.
+    """
+    # If condition is boolean, use it directly
+    if isinstance(condition, bool):
+        return condition
+    
+    # If condition is a reference like $result_last.condition or $result_last.field_name
+    if isinstance(condition, str) and condition.startswith('$'):
+        var_ref = condition[1:]  # Remove $
+        
+        # Check if it's asking for a nested field (e.g., $result_last.field_name)
+        if '.' in var_ref:
+            parts = var_ref.split('.')
+            result_key = parts[0]
+            field_name = parts[1]
+            
+            # Get the result object
+            result_obj = context.get(result_key)
+            
+            # If it's a JSON string, parse it
+            if isinstance(result_obj, str):
+                try:
+                    result_obj = json.loads(result_obj)
+                except json.JSONDecodeError:
+                    result_obj = {}
+            
+            # Extract the field value dynamically
+            if isinstance(result_obj, dict) and field_name in result_obj:
+                return bool(result_obj[field_name])
+        else:
+            # Just reference the variable
+            result_obj = context.get(var_ref)
+            return bool(result_obj) if result_obj is not None else False
+    
+    return False
+
+
+def resolve_parameters(params, context, step_counter, loop_item, outer_loop_item):
+    """
+    Dynamically resolve all parameter variables without hardcoding specific field names.
+    Handles all types of context references.
+    """
+    resolved_params = {}
+    
+    for key, value in params.items():
+        if isinstance(value, str):
+            # Handle nested field references like $result_last.refactored_code or any field
+            if '.' in value and value.startswith('$'):
+                var_ref = value[1:]  # Remove $
+                parts = var_ref.split('.')
+                base_var = parts[0]
+                field_name = parts[1]
+                
+                # Get the base variable
+                if base_var == 'loop_item':
+                    resolved_params[key] = loop_item if loop_item else value
+                elif base_var == 'loop_item_file':
+                    resolved_params[key] = outer_loop_item if outer_loop_item else loop_item if loop_item else value
+                else:
+                    # Try to get from context
+                    base_obj = context.get(base_var)
+                    
+                    if isinstance(base_obj, dict) and field_name in base_obj:
+                        resolved_params[key] = base_obj[field_name]
+                    elif isinstance(base_obj, str):
+                        # If base_obj is plain text, use it
+                        resolved_params[key] = base_obj
+                    else:
+                        resolved_params[key] = value
+            # Handle $loop_item reference
+            elif value == '$loop_item' and loop_item:
+                resolved_params[key] = loop_item
+            elif value == '$loop_item_file' and outer_loop_item:
+                resolved_params[key] = outer_loop_item
+            # Handle $result_last reference
+            elif value == '$result_last' and 'result_last' in context:
+                resolved_params[key] = context['result_last']
+            # Handle negative indexing like $result_-1, $result_-2
+            elif value.startswith('$result_-'):
+                try:
+                    offset = int(value.split('_')[1])
+                    ref_step = step_counter + offset
+                    if ref_step >= 0:
+                        resolved_params[key] = context.get(f'result_{ref_step}', value)
+                    else:
+                        resolved_params[key] = value
+                except:
+                    resolved_params[key] = value
+            # Handle context references like '$result_0'
+            elif value.startswith('$'):
+                var_name = value[1:]
+                resolved_params[key] = context.get(var_name, value)
+            else:
+                resolved_params[key] = value
+        else:
+            resolved_params[key] = value
+    
+    return resolved_params
+
+
+def parse_result(result_text):
+    """
+    Dynamically parse result without assuming specific field names.
+    Tries JSON first, then returns as string.
+    """
+    try:
+        return json.loads(result_text)
+    except json.JSONDecodeError:
+        return result_text
+
+
+async def execute_tool_dynamic(sessions, tool_to_session, tool_name, params):
+    """
+    Execute a tool dynamically on any available session without hardcoding server names.
+    """
+    # Get list of sessions that have this tool
+    available_sessions = tool_to_session.get(tool_name, [])
+    
+    if not available_sessions:
+        raise Exception(f"Tool '{tool_name}' not found in any connected MCP server")
+    
+    # Try each available session
+    for session_name in available_sessions:
+        if session_name not in sessions:
+            continue
+        try:
+            result = await sessions[session_name].call_tool(tool_name, params)
+            print(f"  Server: {session_name}")
+            return result
+        except Exception as e:
+            continue
+    
+    raise Exception(f"Tool '{tool_name}' failed on all available sessions")
 
 async def run_agent():
     # Connect to both MCP servers
@@ -569,10 +507,10 @@ async def run_agent():
                         print("Plan cancelled.")
                         return
                     
-                    # Step 2: Execute the action plan
+                    # Step 2: Execute the action plan with available tools cache
                     print("\n--- Executing Action Plan ---")
                     context = {"user_request": user_request}
-                    results = await execute_action_plan(sessions, action_plan.get('actions', []), context)
+                    results = await execute_action_plan(sessions, action_plan.get('actions', []), context, available_tools_cache=tools_by_server)
                     
                     print("\n--- Execution Complete ---")
                     for step, result in results.items():

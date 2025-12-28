@@ -1,0 +1,20 @@
+{
+    "templates": {
+        "universal-action-plan": {
+            "template_id": "universal-action-plan",
+            "template_desc": "Universal template for executing dynamic action plans with tools, loops, and conditionals",
+            "template_schema_file": "action_plan_schema.json",
+            "template_dir": "d:\\projects\\ai\\code-summarizer-mcp\\schema",
+            "executor_module": "action_plan_executor",
+            "executor_class": "ActionPlanExecutor",
+            "version": "1.0",
+            "enabled": true
+        }
+    },
+    "executor_config": {
+        "timeout_seconds": 300,
+        "max_nested_loops": 5,
+        "max_steps": 1000,
+        "enable_caching": true
+    }
+}
